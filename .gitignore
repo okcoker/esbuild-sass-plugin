@@ -40,7 +40,6 @@ node_modules/
 .env
 .env.test
 
-lib/
 **/dist
 **/out
 **/tmp

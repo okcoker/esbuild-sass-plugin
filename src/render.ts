@@ -1,21 +1,23 @@
-import {dirname, parse, relative, resolve, sep} from 'path'
-import fs, {readFileSync} from 'fs'
-import {fileSyntax, sourceMappingURL} from './utils'
-import * as sass from 'sass'
-import {ImporterResult} from 'sass'
-import {fileURLToPath, pathToFileURL} from 'url'
-import {SassPluginOptions} from './index'
+import { dirname, parse, relative, resolve, sep } from "path";
+import fs, { readFileSync } from "fs";
+import { fileSyntax, sourceMappingURL } from "./utils";
+import * as sass from "sass";
+import { ImporterResult } from "sass";
+import { fileURLToPath, pathToFileURL } from "url";
+import { SassPluginOptions } from "./index";
 
-export type RenderSync = (path: string) => RenderResult
+export type RenderSync = (path: string) => RenderResult;
 
 export type RenderResult = {
-  cssText: string
-  watchFiles: string[]
-}
+  cssText: string;
+  watchFiles: string[];
+};
 
-export function createRenderer(options: SassPluginOptions = {}, sourcemap: boolean): RenderSync {
-
-  const loadPaths = options.loadPaths!
+export function createRenderer(
+  options: SassPluginOptions = {},
+  sourcemap: boolean
+): RenderSync {
+  const loadPaths = options.loadPaths!;
 
   /**
    * NOTE: we're deliberately ignoring sass recommendation to avoid sacrificing speed here!
@@ -25,136 +27,140 @@ export function createRenderer(options: SassPluginOptions = {}, sourcemap: boole
    */
   function resolveImport(pathname: string, ext?: string): string | null {
     if (ext) {
-      let filename = pathname + ext
+      let filename = pathname + ext;
       if (fs.existsSync(filename)) {
-        return filename
+        return filename;
       }
-      const index = filename.lastIndexOf(sep)
-      filename = index >= 0 ? filename.slice(0, index) + sep + '_' + filename.slice(index + 1) : '_' + filename
+      const index = filename.lastIndexOf(sep);
+      filename =
+        index >= 0
+          ? filename.slice(0, index) + sep + "_" + filename.slice(index + 1)
+          : "_" + filename;
       if (fs.existsSync(filename)) {
-        return filename
+        return filename;
       }
-      return null
+      return null;
     } else {
       if (!fs.existsSync(dirname(pathname))) {
-        return null
+        return null;
       }
-      return resolveImport(pathname, '.scss')
-        || resolveImport(pathname, '.css')
-        || resolveImport(pathname, '.sass')
-        || resolveImport(pathname + sep + 'index')
+      return (
+        resolveImport(pathname, ".scss") ||
+        resolveImport(pathname, ".css") ||
+        resolveImport(pathname, ".sass") ||
+        resolveImport(pathname + sep + "index")
+      );
     }
   }
 
-  function resolveRelativeImport(loadPath: string, filename: string): string | null {
-    const absolute = resolve(loadPath, filename)
-    const pathParts = parse(absolute)
-    if (pathParts.ext) {
-      return resolveImport(pathParts.dir + sep + pathParts.name, pathParts.ext)
-    } else {
-      return resolveImport(absolute)
+  function resolveRelativeImport(
+    loadPath: string,
+    filename: string
+  ): string | null {
+    const absolute = resolve(loadPath, filename);
+    const pathParts = parse(absolute);
+    if (pathParts.ext && [".scss", ".css", ".sass"].includes(pathParts.ext)) {
+      return resolveImport(pathParts.dir + sep + pathParts.name, pathParts.ext);
     }
+
+    return resolveImport(absolute);
   }
 
-  const requireOptions = {paths: ['.', ...loadPaths]}
+  const requireOptions = { paths: [".", ...loadPaths] };
 
-  const sepTilde = `${sep}~`
+  const sepTilde = `${sep}~`;
 
   /**
    * renderSync
    */
   return function (path: string): RenderResult {
+    const basedir = dirname(path);
 
-    const basedir = dirname(path)
-
-    let source = fs.readFileSync(path, 'utf-8')
+    let source = fs.readFileSync(path, "utf-8");
     if (options.precompile) {
-      source = options.precompile(source, path)
+      source = options.precompile(source, path);
     }
 
-    const syntax = fileSyntax(path)
-    if (syntax === 'css') {
-      return {cssText: readFileSync(path, 'utf-8'), watchFiles: [path]}
+    const syntax = fileSyntax(path);
+    if (syntax === "css") {
+      return { cssText: readFileSync(path, "utf-8"), watchFiles: [path] };
     }
 
-    const {
-      css,
-      loadedUrls,
-      sourceMap
-    } = sass.compileString(source, {
+    const { css, loadedUrls, sourceMap } = sass.compileString(source, {
       ...options,
       syntax,
       importer: {
         load(canonicalUrl: URL): ImporterResult | null {
-          const pathname = fileURLToPath(canonicalUrl)
-          let contents = fs.readFileSync(pathname, 'utf8')
+          const pathname = fileURLToPath(canonicalUrl);
+          let contents = fs.readFileSync(pathname, "utf8");
           if (options.precompile) {
-            contents = options.precompile(contents, pathname)
+            contents = options.precompile(contents, pathname);
           }
           return {
             contents,
             syntax: fileSyntax(pathname),
-            sourceMapUrl: sourcemap ? canonicalUrl : undefined
-          }
+            sourceMapUrl: sourcemap ? canonicalUrl : undefined,
+          };
         },
         canonicalize(url: string): URL | null {
-          let filename
-          if (url.startsWith('~')) {
-            filename = decodeURI(url.slice(1))
+          let filename;
+          if (url.startsWith("~")) {
+            filename = decodeURI(url.slice(1));
             try {
-              requireOptions.paths[0] = basedir
-              filename = require.resolve(filename, requireOptions)
-            } catch (ignored) {
-            }
-          } else if (url.startsWith('file://')) {
-            filename = fileURLToPath(url)
+              requireOptions.paths[0] = basedir;
+              filename = require.resolve(filename, requireOptions);
+            } catch (ignored) {}
+          } else if (url.startsWith("file://")) {
+            filename = fileURLToPath(url);
             // ================================================ patch for: https://github.com/sass/dart-sass/issues/1581
-            let joint = filename.lastIndexOf(sepTilde)
+            let joint = filename.lastIndexOf(sepTilde);
             if (joint >= 0) {
-              const basedir = filename.slice(0, joint)
-              filename = filename.slice(joint + 2)
+              const basedir = filename.slice(0, joint);
+              filename = filename.slice(joint + 2);
               try {
-                requireOptions.paths[0] = basedir
-                filename = require.resolve(filename, requireOptions)
-              } catch (ignored) {
-              }
+                requireOptions.paths[0] = basedir;
+                filename = require.resolve(filename, requireOptions);
+              } catch (ignored) {}
             }
             // =========================================================================================================
           } else {
-            filename = decodeURI(url)
+            filename = decodeURI(url);
           }
           if (options.importMapper) {
-            filename = options.importMapper(filename)
+            filename = options.importMapper(filename);
           }
-          let resolved = resolveRelativeImport(basedir, filename)
+          let resolved = resolveRelativeImport(basedir, filename);
           if (resolved) {
-            return pathToFileURL(resolved)
+            return pathToFileURL(resolved);
           }
           for (const loadPath of loadPaths) {
-            resolved = resolveRelativeImport(loadPath, filename)
+            resolved = resolveRelativeImport(loadPath, filename);
             if (resolved) {
-              return pathToFileURL(resolved)
+              return pathToFileURL(resolved);
             }
           }
-          return null
-        }
+          return null;
+        },
       },
-      sourceMap: sourcemap
-    })
+      sourceMap: sourcemap,
+    });
 
-    let cssText = css.toString()
+    let cssText = css.toString();
 
     if (sourceMap) {
-      sourceMap.sourceRoot = basedir
-      sourceMap.sources = sourceMap.sources.map(source => {
-        return relative(basedir, source.startsWith("data:") ? path : fileURLToPath(source))
-      })
-      cssText += '\n' + sourceMappingURL(sourceMap)
+      sourceMap.sourceRoot = basedir;
+      sourceMap.sources = sourceMap.sources.map((source) => {
+        return relative(
+          basedir,
+          source.startsWith("data:") ? path : fileURLToPath(source)
+        );
+      });
+      cssText += "\n" + sourceMappingURL(sourceMap);
     }
 
     return {
       cssText,
-      watchFiles: [path, ...loadedUrls.map(fileURLToPath)]
-    }
-  }
+      watchFiles: [path, ...loadedUrls.map(fileURLToPath)],
+    };
+  };
 }
